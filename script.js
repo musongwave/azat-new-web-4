@@ -188,51 +188,59 @@ if (cform) {
     return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
   }
 
-  // Draw a jagged lightning bolt segment
-  function drawBolt(x1, y1, x2, y2, alpha, bright) {
-    if (alpha < 0.01) return;
-    const dx = x2 - x1, dy = y2 - y1;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    if (len < 0.5) return;
-    const nx = -dy / len, ny = dx / len;
-    const segs = Math.max(2, Math.round(len / 8));
-    const dev  = len * (bright ? 0.50 : 0.22);
-
-    const pts = [[x1, y1]];
-    for (let i = 1; i < segs; i++) {
-      const tt = i / segs;
-      const d  = (Math.random() - 0.5) * 2 * dev;
-      pts.push([x1 + dx * tt + nx * d, y1 + dy * tt + ny * d]);
-    }
-    pts.push([x2, y2]);
-
-    ctx.save();
-    if (bright) {
-      ctx.shadowColor = `rgba(255,220,60,${alpha * 0.75})`;
-      ctx.shadowBlur  = 16;
-      ctx.strokeStyle = `rgba(255,245,170,${alpha})`;
-      ctx.lineWidth   = 2;
-    } else {
-      ctx.shadowColor = `rgba(210,150,20,${alpha * 0.45})`;
-      ctx.shadowBlur  = 7;
-      ctx.strokeStyle = `rgba(205,155,35,${alpha * 0.72})`;
-      ctx.lineWidth   = 1;
-    }
-    ctx.lineJoin = 'round';
+  // Build a smooth quadratic-bezier path through an array of {x,y} points
+  function buildPath(pts) {
     ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
-    ctx.stroke();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mx = (pts[i].x + pts[i + 1].x) * 0.5;
+      const my = (pts[i].y + pts[i + 1].y) * 0.5;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+    }
+    const l = pts[pts.length - 1];
+    ctx.lineTo(l.x, l.y);
+  }
+
+  // Draw the spark trail with 3-layer glow using a smooth bezier path
+  function drawTrail(trail, alpha) {
+    if (trail.length < 2 || alpha < 0.01) return;
+    const split = Math.max(1, Math.floor(trail.length * 0.55));
+    const head  = trail.slice(split);   // front portion — full brightness
+    const full  = trail;
+
+    // Layer 1 — wide outer glow
+    ctx.save();
+    ctx.shadowColor = `rgba(0,185,255,${alpha * 0.50})`;
+    ctx.shadowBlur  = 26;
+    ctx.strokeStyle = `rgba(0,165,255,${alpha * 0.18})`;
+    ctx.lineWidth   = 11;
+    ctx.lineCap = ctx.lineJoin = 'round';
+    buildPath(full); ctx.stroke();
+    ctx.restore();
+
+    // Layer 2 — inner glow
+    ctx.save();
+    ctx.shadowColor = `rgba(0,210,255,${alpha * 0.70})`;
+    ctx.shadowBlur  = 10;
+    ctx.strokeStyle = `rgba(0,200,255,${alpha * 0.60})`;
+    ctx.lineWidth   = 2.5;
+    ctx.lineCap = ctx.lineJoin = 'round';
+    buildPath(full); ctx.stroke();
+    ctx.restore();
+
+    // Layer 3 — bright core (head only, fades naturally with trail length)
+    ctx.save();
+    ctx.strokeStyle = `rgba(185,242,255,${alpha * 0.88})`;
+    ctx.lineWidth   = 1;
+    ctx.lineCap = ctx.lineJoin = 'round';
+    buildPath(head); ctx.stroke();
     ctx.restore();
   }
 
   function makeSpark(wi, delay) {
     return {
       wi, t: 0, delay, born: null,
-      state: 'charge',
-      chargeTimer: 0,
-      chargeNeed: 0.5 + Math.random() * 1.1,
-      burstLeft: 0,
+      speed: 0.09 + Math.random() * 0.07,   // smooth constant velocity
       trail: [],
       alpha: 0,
       dead: false,
@@ -273,7 +281,7 @@ if (cform) {
     // Faint static trace (exactly on photo wires)
     wires.forEach(wire => {
       ctx.save();
-      ctx.strokeStyle = 'rgba(200,145,22,0.07)';
+      ctx.strokeStyle = 'rgba(0,160,255,0.06)';
       ctx.lineWidth   = 1;
       ctx.beginPath();
       ctx.moveTo(wire[0].x, wire[0].y);
@@ -297,73 +305,34 @@ if (cform) {
       if (!sp.born) sp.born = now;
       if (now - sp.born < sp.delay) return;
 
-      // Torn inertia state machine
-      if (sp.state === 'charge') {
-        sp.chargeTimer += dt;
-        if (sp.chargeTimer >= sp.chargeNeed) {
-          sp.state     = 'burst';
-          sp.burstLeft = 0.06 + Math.random() * 0.11;
-        }
-      } else {
-        const speed = 0.50 + Math.random() * 0.45;
-        const move  = Math.min(sp.burstLeft, speed * dt);
-        sp.t        += move;
-        sp.burstLeft -= move;
-        if (sp.burstLeft <= 0) {
-          sp.state       = 'charge';
-          sp.chargeTimer = 0;
-          sp.chargeNeed  = 0.35 + Math.random() * 0.85;
-        }
-      }
-
+      // Smooth constant-speed movement
+      sp.t += sp.speed * dt;
       if (sp.t >= 1) { sp.t = 1; sp.flash = 1; sp.dead = true; }
 
-      // Trigger pylon flash when spark reaches pylon attachment zone
+      // Pylon flash trigger
       if (!sp.pylonFlashed && sp.t >= PYLON_T[sp.wi] - 0.02) {
         sp.pylonFlash   = 1.0;
         sp.pylonFlashed = true;
       }
 
-      sp.alpha = sp.t < 0.05 ? sp.t / 0.05
+      sp.alpha = sp.t < 0.06 ? sp.t / 0.06
                : sp.t > 0.90 ? (1 - sp.t) / 0.10
                : 1;
 
-      const pos        = wirePos(sp.wi, sp.t);
-      const isBursting = sp.state === 'burst' && sp.burstLeft > 0;
+      const pos = wirePos(sp.wi, sp.t);
+      sp.trail.push({ x: pos.x, y: pos.y });
+      if (sp.trail.length > 55) sp.trail.shift();
 
-      sp.trail.push({ ...pos, burst: isBursting });
-      if (sp.trail.length > 30) sp.trail.shift();
-
-      for (let i = 1; i < sp.trail.length; i++) {
-        const ratio  = i / sp.trail.length;
-        const bright = sp.trail[i].burst;
-        drawBolt(
-          sp.trail[i-1].x, sp.trail[i-1].y,
-          sp.trail[i].x,   sp.trail[i].y,
-          ratio * sp.alpha * (bright ? 0.92 : 0.38),
-          bright
-        );
-      }
-
-      if (sp.alpha > 0) {
-        ctx.save();
-        ctx.shadowColor = 'rgba(255,225,70,0.95)';
-        ctx.shadowBlur  = isBursting ? 28 : 13;
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, isBursting ? 4.5 : 2, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255,248,185,${sp.alpha})`;
-        ctx.fill();
-        ctx.restore();
-      }
+      drawTrail(sp.trail, sp.alpha);
 
       if (sp.flash > 0) {
         sp.flash = Math.max(0, sp.flash - dt * 2.8);
         ctx.save();
-        ctx.shadowColor = 'rgba(255,210,50,0.95)';
+        ctx.shadowColor = 'rgba(0,200,255,0.95)';
         ctx.shadowBlur  = 55;
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, 9 * sp.flash, 0, Math.PI * 2);
-        ctx.fillStyle   = `rgba(255,235,130,${sp.flash * 0.88})`;
+        ctx.fillStyle   = `rgba(140,230,255,${sp.flash * 0.88})`;
         ctx.fill();
         ctx.restore();
       }
@@ -374,11 +343,11 @@ if (cform) {
         const pp = wirePos(sp.wi, PYLON_T[sp.wi]);
         const pf = sp.pylonFlash;
         ctx.save();
-        ctx.shadowColor = 'rgba(255,200,50,0.98)';
+        ctx.shadowColor = 'rgba(0,200,255,0.98)';
         ctx.shadowBlur  = 60;
         ctx.beginPath();
         ctx.arc(pp.x, pp.y, (3 + (1 - pf) * 22) * pf, 0, Math.PI * 2);
-        ctx.fillStyle   = `rgba(255,238,140,${pf * 0.92})`;
+        ctx.fillStyle   = `rgba(120,225,255,${pf * 0.92})`;
         ctx.fill();
         ctx.restore();
       }
