@@ -114,84 +114,129 @@ if (cform) {
 }
 
 // ══════════════════════════════════════════════
-// ELECTRICAL GRID CANVAS — Amber / Gold palette
+// ELECTRIC DISCHARGE — exact wire paths traced from hero photo pixels
+// Photo 1584x672, bg: cover center 30%
+// Wires go RIGHT->LEFT (pylon -> ARWANA INER text)
+// Torn inertia: charge -> burst -> charge
 // ══════════════════════════════════════════════
-(function initGridCanvas() {
-  const canvas = document.getElementById('gridCanvas');
+(function initElectricCanvas() {
+  const canvas  = document.getElementById('gridCanvas');
   if (!canvas) return;
   const ctx     = canvas.getContext('2d');
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced) { canvas.style.opacity = '0'; return; }
 
-  const NODE_DEFS = [
-    { nx: 0.52, ny: 0.28, type: 'large',  label: 'Aşgabat' },
-    { nx: 0.88, ny: 0.18, type: 'large',  label: 'Lebap' },
-    { nx: 0.72, ny: 0.78, type: 'large',  label: 'Mary' },
-    { nx: 0.30, ny: 0.15, type: 'medium', label: '110kV' },
-    { nx: 0.65, ny: 0.47, type: 'medium', label: '110kV' },
-    { nx: 0.94, ny: 0.54, type: 'medium', label: '110kV' },
-    { nx: 0.44, ny: 0.68, type: 'medium', label: '110kV' },
-    { nx: 0.18, ny: 0.58, type: 'medium', label: '110kV' },
-    { nx: 0.80, ny: 0.90, type: 'medium', label: '110kV' },
-    { nx: 0.42, ny: 0.40, type: 'small' },
-    { nx: 0.60, ny: 0.14, type: 'small' },
-    { nx: 0.76, ny: 0.36, type: 'small' },
-    { nx: 0.14, ny: 0.34, type: 'small' },
-    { nx: 0.55, ny: 0.85, type: 'small' },
-    { nx: 0.92, ny: 0.72, type: 'small' },
-    { nx: 0.34, ny: 0.82, type: 'small' },
-    { nx: 0.08, ny: 0.72, type: 'small' },
-    { nx: 0.63, ny: 0.63, type: 'small' },
+  // Photo metrics (hero-sunset.jpg 1584x672)
+  const PW = 1584, PH = 672;
+  let W = 0, H = 0, bgS = 1, bgX = 0, bgY = 0, animId = null;
+
+  // Wire paths in PHOTO PIXELS [x, y], traced pixel-by-pixel from actual photo.
+  // Direction: index 0 = RIGHT (pylon), last = LEFT (text ARWANA INER).
+  const WIRE_PX = [
+    // Ground/corona wire -- steep diagonal from pylon top
+    [[985,0],[900,15],[850,47],[800,77],[750,107],[700,136]],
+    // Wire 1 -- upper catenary (max sag ~x=350)
+    [[940,96],[900,105],[850,114],[800,123],[750,131],[700,136],
+     [650,145],[600,151],[550,157],[500,162],[450,166],[400,170],
+     [350,173],[300,171],[250,169],[200,167],[150,164],[100,162],[60,159]],
+    // Wire 2 -- middle, nearly horizontal
+    [[940,191],[900,190],[850,189],[800,188],[750,187],[700,186],
+     [650,184],[600,183],[550,181],[500,179],[450,177],[400,176],
+     [350,173],[300,171],[250,175],[200,175],[150,175],[100,173],[60,171]],
+    // Wire 3 -- lower catenary (max sag ~x=650)
+    [[800,238],[750,259],[700,279],[650,298],[600,296],[550,290],
+     [500,284],[450,277],[400,270],[350,263],[300,256],[250,249],
+     [200,242],[150,235],[100,228],[60,222]],
   ];
 
-  const TYPE_CFG = {
-    large:  { r: 10, fill: '#FEF3C7', glowColor: 'rgba(202,138,4,0.5)',  glowBlur: 24 },
-    medium: { r: 6,  fill: '#CA8A04', glowColor: 'rgba(202,138,4,0.3)',  glowBlur: 14 },
-    small:  { r: 3,  fill: '#A16207', glowColor: null,                    glowBlur: 0  },
-  };
-
-  const CONNECT_DIST = 0.38;
-  const PULSE_COUNT  = 12;
-
-  let W = 0, H = 0;
-  let nodes = [], connections = [], pulses = [];
-  let animId = null;
-
-  function buildNodes() {
-    nodes = NODE_DEFS.map(def => ({
-      ...def, x: 0, y: 0,
-      floatAmp:    2 + Math.random() * 2,
-      floatPeriod: (8 + Math.random() * 7) * 1000,
-      floatOffset: Math.random() * Math.PI * 2,
-      flashAlpha:  0,
-    }));
+  // Recompute background transform: background-size:cover; background-position:center 30%
+  function computeBg() {
+    bgS = Math.max(W / PW, H / PH);
+    bgX = (W - PW * bgS) * 0.5;
+    bgY = (H - PH * bgS) * 0.30;
   }
 
-  function buildConnections() {
-    connections = [];
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const dx = nodes[i].nx - nodes[j].nx;
-        const dy = nodes[i].ny - nodes[j].ny;
-        if (Math.sqrt(dx * dx + dy * dy) < CONNECT_DIST) {
-          const isMain = nodes[i].type !== 'small' && nodes[j].type !== 'small';
-          connections.push({ a: i, b: j, width: isMain ? 1.5 : 1 });
-        }
-      }
+  // Photo pixel -> canvas pixel
+  function p2c(px, py) {
+    return { x: px * bgS + bgX, y: py * bgS + bgY };
+  }
+
+  // Precomputed canvas-space wires (rebuilt on resize)
+  let wires = [];
+  function buildWires() {
+    wires = WIRE_PX.map(pts => pts.map(([px, py]) => p2c(px, py)));
+  }
+
+  // Interpolate canvas position along a wire (t 0->1 = right pylon -> left text)
+  function wirePos(wi, t) {
+    const pts = wires[wi], n = pts.length - 1;
+    const s = Math.min(t * n, n - 1e-5);
+    const i = Math.floor(s), f = s - i;
+    const a = pts[i], b = pts[i + 1];
+    return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+  }
+
+  // Draw a jagged lightning bolt segment
+  function drawBolt(x1, y1, x2, y2, alpha, bright) {
+    if (alpha < 0.01) return;
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 0.5) return;
+    const nx = -dy / len, ny = dx / len;
+    const segs = Math.max(2, Math.round(len / 8));
+    const dev  = len * (bright ? 0.50 : 0.22);
+
+    const pts = [[x1, y1]];
+    for (let i = 1; i < segs; i++) {
+      const tt = i / segs;
+      const d  = (Math.random() - 0.5) * 2 * dev;
+      pts.push([x1 + dx * tt + nx * d, y1 + dy * tt + ny * d]);
     }
+    pts.push([x2, y2]);
+
+    ctx.save();
+    if (bright) {
+      ctx.shadowColor = `rgba(255,220,60,${alpha * 0.75})`;
+      ctx.shadowBlur  = 16;
+      ctx.strokeStyle = `rgba(255,245,170,${alpha})`;
+      ctx.lineWidth   = 2;
+    } else {
+      ctx.shadowColor = `rgba(210,150,20,${alpha * 0.45})`;
+      ctx.shadowBlur  = 7;
+      ctx.strokeStyle = `rgba(205,155,35,${alpha * 0.72})`;
+      ctx.lineWidth   = 1;
+    }
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+    ctx.stroke();
+    ctx.restore();
   }
 
-  function makePulse() {
-    if (!connections.length) return null;
+  function makeSpark(wi, delay) {
     return {
-      conn:     connections[Math.floor(Math.random() * connections.length)],
-      forward:  Math.random() < 0.5,
-      progress: Math.random(),
-      speed:    0.003 + Math.random() * 0.004,
+      wi, t: 0, delay, born: null,
+      state: 'charge',
+      chargeTimer: 0,
+      chargeNeed: 0.5 + Math.random() * 1.1,
+      burstLeft: 0,
+      trail: [],
+      alpha: 0,
+      dead: false,
+      flash: 0,
     };
   }
 
-  function buildPulses() {
-    pulses = Array.from({ length: PULSE_COUNT }, makePulse);
+  let sparks = [];
+
+  function spawnAll() {
+    sparks = [];
+    WIRE_PX.forEach((_, wi) => {
+      for (let k = 0; k < 2; k++) {
+        sparks.push(makeSpark(wi, wi * 420 + k * 1100 + Math.random() * 700));
+      }
+    });
   }
 
   function resize() {
@@ -200,136 +245,133 @@ if (cform) {
     canvas.width  = W * devicePixelRatio;
     canvas.height = H * devicePixelRatio;
     ctx.scale(devicePixelRatio, devicePixelRatio);
-    nodes.forEach(n => { n.x = n.nx * W; n.y = n.ny * H; });
-  }
-
-  function getFloatY(node, t) {
-    if (reduced) return 0;
-    return node.floatAmp * Math.sin((t / node.floatPeriod) * Math.PI * 2 + node.floatOffset);
-  }
-
-  function drawConnections() {
-    connections.forEach(({ a, b, width }) => {
-      ctx.beginPath();
-      ctx.moveTo(nodes[a].x, nodes[a].y);
-      ctx.lineTo(nodes[b].x, nodes[b].y);
-      ctx.strokeStyle = 'rgba(161,98,7,0.25)';
-      ctx.lineWidth   = width;
-      ctx.stroke();
-    });
-  }
-
-  function drawNode(node, t) {
-    const cfg = TYPE_CFG[node.type];
-    const x   = node.x;
-    const y   = node.y + getFloatY(node, t);
-
-    if (cfg.glowBlur > 0) {
-      ctx.save();
-      ctx.shadowColor = cfg.glowColor;
-      ctx.shadowBlur  = cfg.glowBlur + node.flashAlpha * 30;
-      ctx.beginPath();
-      ctx.arc(x, y, cfg.r, 0, Math.PI * 2);
-      ctx.fillStyle = cfg.fill;
-      ctx.fill();
-      ctx.restore();
-    }
-
-    ctx.beginPath();
-    ctx.arc(x, y, cfg.r, 0, Math.PI * 2);
-    ctx.fillStyle = cfg.fill;
-    ctx.fill();
-
-    if (node.type === 'large' && node.flashAlpha > 0) {
-      ctx.beginPath();
-      ctx.arc(x, y, cfg.r + 6, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(202,138,4,${node.flashAlpha * 0.7})`;
-      ctx.lineWidth   = 2;
-      ctx.stroke();
-    }
-
-    if (node.label && node.type !== 'small') {
-      ctx.font      = '600 9px Jost, sans-serif';
-      ctx.fillStyle = 'rgba(161,98,7,0.75)';
-      ctx.textAlign = 'center';
-      ctx.fillText(node.label, x, y + cfg.r + 13);
-    }
-  }
-
-  function drawPulse(pulse, t) {
-    if (!pulse) return;
-    const na = nodes[pulse.conn.a];
-    const nb = nodes[pulse.conn.b];
-    const p  = pulse.forward ? pulse.progress : 1 - pulse.progress;
-    const px = na.x + (nb.x - na.x) * p;
-    const py = (na.y + getFloatY(na, t)) + ((nb.y + getFloatY(nb, t)) - (na.y + getFloatY(na, t))) * p;
-
-    ctx.save();
-    ctx.shadowColor = 'rgba(202,138,4,0.6)';
-    ctx.shadowBlur  = 12;
-    ctx.beginPath();
-    ctx.arc(px, py, 3, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(202,138,4,0.92)';
-    ctx.fill();
-    ctx.restore();
-  }
-
-  function stepPulses() {
-    pulses.forEach((pulse, i) => {
-      if (!pulse) { pulses[i] = makePulse(); return; }
-      pulse.progress += pulse.speed;
-      if (pulse.progress >= 1) {
-        const arrIdx = pulse.forward ? pulse.conn.b : pulse.conn.a;
-        nodes[arrIdx].flashAlpha = 1;
-        pulses[i] = makePulse();
-      }
-    });
-  }
-
-  function stepFlashes(dt) {
-    nodes.forEach(n => {
-      if (n.flashAlpha > 0) n.flashAlpha = Math.max(0, n.flashAlpha - dt / 400);
-    });
+    computeBg();
+    buildWires();
   }
 
   let lastT = 0;
-  function draw(t) {
-    const dt = Math.min(t - lastT, 50);
-    lastT = t;
-    ctx.clearRect(0, 0, W, H);
-    drawConnections();
-    if (!reduced) pulses.forEach(p => drawPulse(p, t));
-    nodes.forEach(n => drawNode(n, t));
-    if (!reduced) { stepPulses(); stepFlashes(dt); }
-    animId = requestAnimationFrame(draw);
-  }
 
-  function drawStatic() {
+  function frame(now) {
+    const dt = Math.min(now - lastT, 50) / 1000;
+    lastT = now;
     ctx.clearRect(0, 0, W, H);
-    drawConnections();
-    nodes.forEach(n => drawNode(n, 0));
+
+    // Faint static trace (exactly on photo wires)
+    wires.forEach(wire => {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(200,145,22,0.07)';
+      ctx.lineWidth   = 1;
+      ctx.beginPath();
+      ctx.moveTo(wire[0].x, wire[0].y);
+      wire.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    // Replenish sparks
+    WIRE_PX.forEach((_, wi) => {
+      if (sparks.filter(s => s.wi === wi && !s.dead).length < 2) {
+        const sp = makeSpark(wi, 300 + Math.random() * 1400);
+        sp.born = now;
+        sparks.push(sp);
+      }
+    });
+
+    sparks = sparks.filter(s => !s.dead);
+
+    sparks.forEach(sp => {
+      if (!sp.born) sp.born = now;
+      if (now - sp.born < sp.delay) return;
+
+      // Torn inertia state machine
+      if (sp.state === 'charge') {
+        sp.chargeTimer += dt;
+        if (sp.chargeTimer >= sp.chargeNeed) {
+          sp.state     = 'burst';
+          sp.burstLeft = 0.06 + Math.random() * 0.11;
+        }
+      } else {
+        const speed = 0.50 + Math.random() * 0.45;
+        const move  = Math.min(sp.burstLeft, speed * dt);
+        sp.t        += move;
+        sp.burstLeft -= move;
+        if (sp.burstLeft <= 0) {
+          sp.state       = 'charge';
+          sp.chargeTimer = 0;
+          sp.chargeNeed  = 0.35 + Math.random() * 0.85;
+        }
+      }
+
+      if (sp.t >= 1) { sp.t = 1; sp.flash = 1; sp.dead = true; }
+
+      sp.alpha = sp.t < 0.05 ? sp.t / 0.05
+               : sp.t > 0.90 ? (1 - sp.t) / 0.10
+               : 1;
+
+      const pos        = wirePos(sp.wi, sp.t);
+      const isBursting = sp.state === 'burst' && sp.burstLeft > 0;
+
+      sp.trail.push({ ...pos, burst: isBursting });
+      if (sp.trail.length > 30) sp.trail.shift();
+
+      for (let i = 1; i < sp.trail.length; i++) {
+        const ratio  = i / sp.trail.length;
+        const bright = sp.trail[i].burst;
+        drawBolt(
+          sp.trail[i-1].x, sp.trail[i-1].y,
+          sp.trail[i].x,   sp.trail[i].y,
+          ratio * sp.alpha * (bright ? 0.92 : 0.38),
+          bright
+        );
+      }
+
+      if (sp.alpha > 0) {
+        ctx.save();
+        ctx.shadowColor = 'rgba(255,225,70,0.95)';
+        ctx.shadowBlur  = isBursting ? 28 : 13;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, isBursting ? 4.5 : 2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,248,185,${sp.alpha})`;
+        ctx.fill();
+        ctx.restore();
+      }
+
+      if (sp.flash > 0) {
+        sp.flash = Math.max(0, sp.flash - dt * 2.8);
+        ctx.save();
+        ctx.shadowColor = 'rgba(255,210,50,0.95)';
+        ctx.shadowBlur  = 55;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, 9 * sp.flash, 0, Math.PI * 2);
+        ctx.fillStyle   = `rgba(255,235,130,${sp.flash * 0.88})`;
+        ctx.fill();
+        ctx.restore();
+      }
+    });
+
+    animId = requestAnimationFrame(frame);
   }
 
   function init() {
-    buildNodes();
-    buildConnections();
-    buildPulses();
     resize();
+    spawnAll();
+    sparks.forEach(s => { s.born = performance.now(); });
     requestAnimationFrame(() => {
       canvas.style.opacity = '1';
-      if (reduced) { drawStatic(); } else { animId = requestAnimationFrame(draw); }
+      animId = requestAnimationFrame(frame);
     });
   }
 
   const ro = new ResizeObserver(() => {
     if (animId) { cancelAnimationFrame(animId); animId = null; }
     resize();
-    if (reduced) { drawStatic(); } else { animId = requestAnimationFrame(draw); }
+    animId = requestAnimationFrame(frame);
   });
-  ro.observe(canvas.parentElement);
+  ro.observe(canvas.parentElement || document.body);
 
   init();
 })();
+
 
 // ══════════════════════════════════════════════
 // PRODUCT MODAL
