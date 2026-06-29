@@ -16,7 +16,7 @@ mobMenu.querySelectorAll('a').forEach(a => {
 
 // ── Language switcher ──
 function applyLang(lang) {
-  document.documentElement.lang = lang === 'tm' ? 'tk' : lang === 'ru' ? 'ru' : 'en';
+  document.documentElement.lang = lang === 'tm' ? 'tk' : 'en';
   document.querySelectorAll('[data-tm]').forEach(el => {
     const text = el.dataset[lang] ?? el.dataset.en;
     if (text !== undefined) {
@@ -130,24 +130,36 @@ if (cform) {
   const PW = 1584, PH = 672;
   let W = 0, H = 0, bgS = 1, bgX = 0, bgY = 0, animId = null;
 
-  // Wire paths in PHOTO PIXELS [x, y], traced pixel-by-pixel from actual photo.
-  // Direction: index 0 = RIGHT (pylon), last = LEFT (text ARWANA INER).
+  // Wire paths in PHOTO PIXELS [x, y].
+  // Direction: index 0 = LEFT (ARWANA INER text), last = RIGHT EDGE.
+  // Right-side coordinates verified with PIL brightness scan.
   const WIRE_PX = [
-    // Ground/corona wire -- steep diagonal from pylon top
-    [[985,0],[900,15],[850,47],[800,77],[750,107],[700,136]],
-    // Wire 1 -- upper catenary (max sag ~x=350)
-    [[940,96],[900,105],[850,114],[800,123],[750,131],[700,136],
-     [650,145],[600,151],[550,157],[500,162],[450,166],[400,170],
-     [350,173],[300,171],[250,169],[200,167],[150,164],[100,162],[60,159]],
-    // Wire 2 -- middle, nearly horizontal
-    [[940,191],[900,190],[850,189],[800,188],[750,187],[700,186],
-     [650,184],[600,183],[550,181],[500,179],[450,177],[400,176],
-     [350,173],[300,171],[250,175],[200,175],[150,175],[100,173],[60,171]],
-    // Wire 3 -- lower catenary (max sag ~x=650)
-    [[800,238],[750,259],[700,279],[650,298],[600,296],[550,290],
-     [500,284],[450,277],[400,270],[350,263],[300,256],[250,249],
-     [200,242],[150,235],[100,228],[60,222]],
+    // Wire 1 — upper catenary: text→pylon [940,96]→right edge (scan: y 96→187)
+    [
+      [60,159],[100,162],[150,164],[200,167],[250,169],[300,171],[350,173],[400,170],
+      [450,166],[500,162],[550,157],[600,151],[650,145],[700,136],[750,131],[800,123],
+      [850,114],[900,105],[940,96],
+      [1060,90],[1140,96],[1200,109],[1260,122],[1340,139],[1420,156],[1500,172],[1560,183],[1584,187]
+    ],
+    // Wire 2 — middle: text→pylon [940,191]→right edge (scan: y 191→275)
+    [
+      [60,171],[100,173],[150,175],[200,175],[250,175],[300,171],[350,173],[400,176],
+      [450,177],[500,179],[550,181],[600,183],[650,184],[700,186],[750,187],[800,188],
+      [850,189],[900,190],[940,191],
+      [1060,207],[1160,213],[1260,230],[1360,243],[1460,255],[1560,272],[1584,275]
+    ],
+    // Wire 3 — lower: text→pylon arm [800,238]→right edge (scan: y 238→400)
+    [
+      [60,222],[100,228],[150,235],[200,242],[250,249],[300,256],[350,263],[400,270],
+      [450,277],[500,284],[550,290],[600,296],[650,298],[700,279],[750,259],
+      [800,238],
+      [900,265],[1020,310],[1140,340],[1280,362],[1420,380],[1560,396],[1584,400]
+    ],
   ];
+
+  // Normalised t at pylon attachment per wire (index / (len-1)):
+  // Wire 1: index 18 of 28 pts = 18/27; Wire 2: 18/26 = 18/25; Wire 3: 15/23 = 15/22
+  const PYLON_T = [18/27, 18/25, 15/22];
 
   // Recompute background transform: background-size:cover; background-position:center 30%
   function computeBg() {
@@ -225,6 +237,8 @@ if (cform) {
       alpha: 0,
       dead: false,
       flash: 0,
+      pylonFlash: 0,
+      pylonFlashed: false,
     };
   }
 
@@ -304,6 +318,12 @@ if (cform) {
 
       if (sp.t >= 1) { sp.t = 1; sp.flash = 1; sp.dead = true; }
 
+      // Trigger pylon flash when spark reaches pylon attachment zone
+      if (!sp.pylonFlashed && sp.t >= PYLON_T[sp.wi] - 0.02) {
+        sp.pylonFlash   = 1.0;
+        sp.pylonFlashed = true;
+      }
+
       sp.alpha = sp.t < 0.05 ? sp.t / 0.05
                : sp.t > 0.90 ? (1 - sp.t) / 0.10
                : 1;
@@ -347,6 +367,21 @@ if (cform) {
         ctx.fill();
         ctx.restore();
       }
+
+      // Pylon node burst — expanding ring at attachment point
+      if (sp.pylonFlash > 0) {
+        sp.pylonFlash = Math.max(0, sp.pylonFlash - dt * 2.2);
+        const pp = wirePos(sp.wi, PYLON_T[sp.wi]);
+        const pf = sp.pylonFlash;
+        ctx.save();
+        ctx.shadowColor = 'rgba(255,200,50,0.98)';
+        ctx.shadowBlur  = 60;
+        ctx.beginPath();
+        ctx.arc(pp.x, pp.y, (3 + (1 - pf) * 22) * pf, 0, Math.PI * 2);
+        ctx.fillStyle   = `rgba(255,238,140,${pf * 0.92})`;
+        ctx.fill();
+        ctx.restore();
+      }
     });
 
     animId = requestAnimationFrame(frame);
@@ -379,45 +414,41 @@ if (cform) {
 const PRODUCTS = [
   {
     id: 'electrical',
-    tag:   { tm: 'Elektrik',      en: 'Electrical',    ru: 'Электрооборудование' },
-    title: { tm: 'Elektrik paýlaýjy enjamlary',        en: 'Electrical Distribution Equipment',          ru: 'Распределительное электрооборудование' },
+    tag:   { tm: 'Elektrik',      en: 'Electrical' },
+    title: { tm: 'Elektrik paýlaýjy enjamlary',        en: 'Electrical Distribution Equipment' },
     desc:  {
       tm: 'ÝPG, KRU we beýleki elektrik paýlaýjy enjamlary. Podstansiýa we paýlaýjy nokatlar üçin ähli görnüşdäki enjamlary üpjün edýäris. 220 kV çenli ähli güýç derejelerine laýyk gelýär.',
       en: 'Switchgear, KRU and other electrical distribution equipment. We supply all types of equipment for substations and distribution points. Compatible with all voltage levels up to 220 kV.',
-      ru: 'Коммутационные аппараты, КРУ и прочее распределительное оборудование. Поставляем все типы оборудования для подстанций и распределительных пунктов. Совместимо со всеми классами напряжения до 220 кВ.',
     },
     images: [117,118,119,121,123,124,125].map(n => `images/products/img-${n}.jpg`),
   },
   {
     id: 'transformers',
-    tag:   { tm: 'Transformator', en: 'Transformer',   ru: 'Трансформатор' },
-    title: { tm: 'Güýç transformatorlary',             en: 'Power Transformers',                         ru: 'Силовые трансформаторы' },
+    tag:   { tm: 'Transformator', en: 'Transformer' },
+    title: { tm: 'Güýç transformatorlary',             en: 'Power Transformers' },
     desc:  {
       tm: 'Dürli güýç derejelerinde güýç transformatorlary. Pes we ýokary woltly transformatorlar, düwürme desgalary we podstansiýa transformatorlary. Uzak möhletleýin işlemek üçin taslanýar.',
       en: 'Power transformers at various voltage levels. Low and high voltage transformers, step-up/step-down units and substation transformers. Designed for long-term operation.',
-      ru: 'Силовые трансформаторы различных классов напряжения. Трансформаторы низкого и высокого напряжения, повышающие/понижающие агрегаты и трансформаторы для подстанций. Проектируются для долгосрочной эксплуатации.',
     },
     images: [127,129,130,131,132,133,134,135,136,137,138,139,140,141,142,144].map(n => `images/products/img-${n}.jpg`),
   },
   {
     id: 'pumps',
-    tag:   { tm: 'Öz önümimiz', en: 'Own Production', ru: 'Собственное производство' },
-    title: { tm: 'Suwa basdyrylýan nasoslar',          en: 'Submersible Pumps',                          ru: 'Погружные насосы' },
+    tag:   { tm: 'Öz önümimiz', en: 'Own Production' },
+    title: { tm: 'Suwa basdyrylýan nasoslar',          en: 'Submersible Pumps' },
     desc:  {
       tm: 'Öz önümimiz — ýokary öndürijilikli suw nasos enjamlary. Çuň guýular, suw üpjünçiligi we suwaryş ulgamlary üçin niýetlenen. Agrotehnologiýa we senagat ulanylmak üçin laýyk.',
       en: 'Our own production — high-performance water pump equipment. Designed for deep wells, water supply and irrigation systems. Suitable for agricultural and industrial use.',
-      ru: 'Собственное производство — высокопроизводительное насосное оборудование. Предназначено для глубоких скважин, систем водоснабжения и орошения. Подходит для сельскохозяйственного и промышленного использования.',
     },
     images: Array.from({ length: 7 }, (_, i) => `images/pumps/img-${145 + i}.jpg`),
   },
   {
     id: 'transport',
-    tag:   { tm: 'Transport',    en: 'Transport',      ru: 'Транспорт' },
-    title: { tm: 'Ýöriteleşdirilen ulaglar',           en: 'Specialized Vehicles',                       ru: 'Специализированный транспорт' },
+    tag:   { tm: 'Transport',    en: 'Transport' },
+    title: { tm: 'Ýöriteleşdirilen ulaglar',           en: 'Specialized Vehicles' },
     desc:  {
       tm: 'Agyr ýük we ýörite tehnikalar parky. Uly göwrümli ýükleri, inženerçilik enjamlary we gurluşyk materiallaryny daşamak üçin ullanylýar. Giň gurply çäklere baryp bilýär.',
       en: 'Heavy cargo and special equipment fleet. Used for transporting oversized loads, engineering equipment and construction materials. Can reach remote areas across all regions.',
-      ru: 'Парк тяжёлого и специализированного транспорта. Используется для перевозки крупногабаритных грузов, инженерного оборудования и строительных материалов. Может добраться до отдалённых районов во всех регионах.',
     },
     images: Array.from({ length: 8 }, (_, i) => `images/transport/img-${100 + i}.jpg`),
   },
@@ -520,3 +551,20 @@ document.addEventListener('click', e => {
   const index    = allItems.indexOf(item);
   openLightbox(srcs, index);
 });
+
+/* ── Переключатель темы (убрать после утверждения) ── */
+(function() {
+  const btn   = document.getElementById('themeToggle');
+  const label = btn.querySelector('.tt-label');
+
+  if (localStorage.getItem('previewTheme') === 'navy') {
+    document.body.classList.add('navy');
+    label.textContent = 'Gold';
+  }
+
+  btn.addEventListener('click', () => {
+    const isNavy = document.body.classList.toggle('navy');
+    label.textContent = isNavy ? 'Gold' : 'Navy';
+    localStorage.setItem('previewTheme', isNavy ? 'navy' : 'gold');
+  });
+})();

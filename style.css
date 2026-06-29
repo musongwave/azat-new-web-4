@@ -677,3 +677,70 @@ p { line-height: 1.7; }
   .about-img-1 { width: 75%; height: 150px; }
   .about-img-2 { width: 60%; height: 120px; }
 }
+
+/* ══════════════════════════════════════════════
+   NAVY THEME — предпросмотр (убрать после утверждения)
+   ══════════════════════════════════════════════ */
+body.navy {
+  --bg:         #0B0F1E;
+  --bg-2:       #111827;
+  --bg-3:       #1B2438;
+  --fg:         #F4F7FF;
+  --muted:      #8892A4;
+  --muted-2:    #5A6A82;
+  --gold:       #F97316;
+  --gold-h:     #FB923C;
+  --gold-light: #FFEDD5;
+  --border:     rgba(249,115,22,0.22);
+  --border-2:   rgba(249,115,22,0.42);
+}
+body.navy .header {
+  background: rgba(11,15,30,0.88);
+}
+body.navy .hero-bg::after {
+  background: linear-gradient(
+    to right,
+    rgba(4,6,16,0.82) 0%, rgba(6,9,22,0.65) 35%,
+    rgba(10,14,30,0.32) 65%, rgba(14,19,40,0.10) 100%
+  );
+}
+body.navy .prod-modal-tag {
+  background: rgba(249,115,22,0.12);
+}
+
+/* ── Кнопка переключения темы ── */
+.theme-toggle {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 50px;
+  border: 1.5px solid var(--border-2);
+  background: var(--bg-2);
+  color: var(--gold-light);
+  font-family: 'Jost', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.25s, border-color 0.25s, box-shadow 0.25s;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+}
+.theme-toggle:hover {
+  background: var(--border);
+  border-color: var(--gold-h);
+  box-shadow: 0 6px 32px rgba(0,0,0,0.65);
+}
+.theme-toggle .tt-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gold);
+  transition: background 0.25s;
+  flex-shrink: 0;
+}
