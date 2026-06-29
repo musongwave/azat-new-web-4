@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/images/:path*", "destination": "https://arwana-iner.vercel.app/images/:path*" }
+  ]
+}
